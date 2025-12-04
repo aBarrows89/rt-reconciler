@@ -103,7 +103,7 @@ class ReconcilerApp:
         discrepancies = merged[merged['DIFF'] != 0].sort_values('DIFF', key=abs, ascending=False)
         not_in_rt = discrepancies[discrepancies['RT'] == 0].copy()
         
-        # Build dict of IET # -> DIFF amount (how many to highlight per SKU)
+        # Build dict of IET # -> DIFF amount (how many UNITS to highlight per SKU)
         diff_dict = {}
         for _, row in discrepancies.iterrows():
             iet = str(row['IET #'])
@@ -121,7 +121,7 @@ class ReconcilerApp:
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             merged.to_excel(writer, sheet_name='Full Comparison', index=False)
         
-        # Apply formatting and highlight only the DIFF amount per SKU
+        # Apply formatting and highlight based on return_qty
         self.format_and_highlight(output_file, diff_dict)
         
         return output_file
@@ -166,27 +166,36 @@ class ReconcilerApp:
                         for cell in row[:diff_col]:
                             cell.fill = fill
             
-            # Highlight only DIFF amount of rows per SKU in IE Tire Detail
+            # Highlight based on return_qty in IE Tire Detail
             if ws.title == 'IE Tire Detail':
-                # Find IET # column
+                # Find IET # and return_qty columns
                 iet_col = None
+                qty_col = None
                 for i, cell in enumerate(ws[1], 1):
                     if cell.value == 'IET #':
                         iet_col = i
-                        break
+                    if cell.value == 'return_qty':
+                        qty_col = i
                 
-                if iet_col:
-                    # Track how many we've highlighted per SKU
-                    highlight_count = {k: 0 for k in diff_dict.keys()}
+                if iet_col and qty_col:
+                    # Track how many UNITS we've highlighted per SKU
+                    highlight_qty = {k: 0 for k in diff_dict.keys()}
                     
                     for row in ws.iter_rows(min_row=2):
                         iet_value = str(row[iet_col-1].value or '')
+                        row_qty = row[qty_col-1].value or 1
+                        try:
+                            row_qty = int(row_qty)
+                        except:
+                            row_qty = 1
+                        
                         if iet_value in diff_dict:
-                            # Only highlight up to DIFF amount
-                            if highlight_count[iet_value] < diff_dict[iet_value]:
+                            # Only highlight if we haven't reached the DIFF amount yet
+                            remaining = diff_dict[iet_value] - highlight_qty[iet_value]
+                            if remaining > 0:
                                 for cell in row:
                                     cell.fill = red
-                                highlight_count[iet_value] += 1
+                                highlight_qty[iet_value] += row_qty
         
         wb.save(file_path)
 
