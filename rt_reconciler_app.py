@@ -103,8 +103,13 @@ class ReconcilerApp:
         discrepancies = merged[merged['DIFF'] != 0].sort_values('DIFF', key=abs, ascending=False)
         not_in_rt = discrepancies[discrepancies['RT'] == 0].copy()
         
-        # Get ALL discrepancy IET #s for highlighting (not just Not in RT)
-        all_discrepancy_list = set(discrepancies['IET #'].astype(str).tolist())
+        # Build dict of IET # -> DIFF amount (how many to highlight per SKU)
+        diff_dict = {}
+        for _, row in discrepancies.iterrows():
+            iet = str(row['IET #'])
+            diff = int(row['DIFF'])
+            if diff > 0:  # Only highlight if Simple has more than RT
+                diff_dict[iet] = diff
         
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
@@ -116,12 +121,12 @@ class ReconcilerApp:
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             merged.to_excel(writer, sheet_name='Full Comparison', index=False)
         
-        # Apply formatting and highlight ALL discrepancies in detail
-        self.format_and_highlight(output_file, all_discrepancy_list)
+        # Apply formatting and highlight only the DIFF amount per SKU
+        self.format_and_highlight(output_file, diff_dict)
         
         return output_file
     
-    def format_and_highlight(self, file_path, discrepancy_list):
+    def format_and_highlight(self, file_path, diff_dict):
         wb = load_workbook(file_path)
         
         header_fill = PatternFill('solid', fgColor='4472C4')
@@ -161,7 +166,7 @@ class ReconcilerApp:
                         for cell in row[:diff_col]:
                             cell.fill = fill
             
-            # Highlight ALL discrepancy rows in IE Tire Detail
+            # Highlight only DIFF amount of rows per SKU in IE Tire Detail
             if ws.title == 'IE Tire Detail':
                 # Find IET # column
                 iet_col = None
@@ -171,11 +176,17 @@ class ReconcilerApp:
                         break
                 
                 if iet_col:
+                    # Track how many we've highlighted per SKU
+                    highlight_count = {k: 0 for k in diff_dict.keys()}
+                    
                     for row in ws.iter_rows(min_row=2):
                         iet_value = str(row[iet_col-1].value or '')
-                        if iet_value in discrepancy_list:
-                            for cell in row:
-                                cell.fill = red
+                        if iet_value in diff_dict:
+                            # Only highlight up to DIFF amount
+                            if highlight_count[iet_value] < diff_dict[iet_value]:
+                                for cell in row:
+                                    cell.fill = red
+                                highlight_count[iet_value] += 1
         
         wb.save(file_path)
 
