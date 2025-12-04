@@ -103,8 +103,8 @@ class ReconcilerApp:
         discrepancies = merged[merged['DIFF'] != 0].sort_values('DIFF', key=abs, ascending=False)
         not_in_rt = discrepancies[discrepancies['RT'] == 0].copy()
         
-        # Get list of IET #s not in RT for highlighting
-        not_in_rt_list = set(not_in_rt['IET #'].astype(str).tolist())
+        # Get ALL discrepancy IET #s for highlighting (not just Not in RT)
+        all_discrepancy_list = set(discrepancies['IET #'].astype(str).tolist())
         
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
@@ -116,12 +116,12 @@ class ReconcilerApp:
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             merged.to_excel(writer, sheet_name='Full Comparison', index=False)
         
-        # Apply formatting and highlight Not in RT rows in detail
-        self.format_and_highlight(output_file, not_in_rt_list)
+        # Apply formatting and highlight ALL discrepancies in detail
+        self.format_and_highlight(output_file, all_discrepancy_list)
         
         return output_file
     
-    def format_and_highlight(self, file_path, not_in_rt_list):
+    def format_and_highlight(self, file_path, discrepancy_list):
         wb = load_workbook(file_path)
         
         header_fill = PatternFill('solid', fgColor='4472C4')
@@ -161,7 +161,7 @@ class ReconcilerApp:
                         for cell in row[:diff_col]:
                             cell.fill = fill
             
-            # Highlight Not in RT rows in IE Tire Detail
+            # Highlight ALL discrepancy rows in IE Tire Detail
             if ws.title == 'IE Tire Detail':
                 # Find IET # column
                 iet_col = None
@@ -173,7 +173,7 @@ class ReconcilerApp:
                 if iet_col:
                     for row in ws.iter_rows(min_row=2):
                         iet_value = str(row[iet_col-1].value or '')
-                        if iet_value in not_in_rt_list:
+                        if iet_value in discrepancy_list:
                             for cell in row:
                                 cell.fill = red
         
