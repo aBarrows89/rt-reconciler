@@ -111,51 +111,53 @@ class ReconcilerApp:
             if diff > 0:
                 diff_dict[iet] = diff
         
-        # Pre-calculate which rows to highlight (using detail_df to sort by qty)
-        rows_to_highlight = self.calculate_rows_to_highlight(detail_df, diff_dict)
+        # Calculate which rows to highlight (red=full, yellow=partial)
+        red_rows, yellow_rows = self.calculate_rows_to_highlight(detail_df, diff_dict)
         
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            pd.DataFrame({'Metric': ['Total SKUs', 'Reconciled', 'Discrepancies', 'Not in RT', '', 'SIMPLE Total', 'RT Total', 'Variance'], 'Value': [len(merged), len(reconciled), len(discrepancies), len(not_in_rt), '', merged['SIMPLE'].sum(), merged['RT'].sum(), merged['DIFF'].sum()]}).to_excel(writer, sheet_name='Summary', index=False)
+            pd.DataFrame({'Metric': ['Total SKUs', 'Reconciled', 'Discrepancies', 'Not in RT', '', 'SIMPLE Total', 'RT Total', 'Variance', '', 'Red = Full row variance', 'Yellow = Partial (row qty > needed)'], 'Value': [len(merged), len(reconciled), len(discrepancies), len(not_in_rt), '', merged['SIMPLE'].sum(), merged['RT'].sum(), merged['DIFF'].sum(), '', '', '']}).to_excel(writer, sheet_name='Summary', index=False)
             discrepancies.to_excel(writer, sheet_name='Discrepancies', index=False)
             reconciled.to_excel(writer, sheet_name='Reconciled', index=False)
             not_in_rt.to_excel(writer, sheet_name='Not in RT', index=False)
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             merged.to_excel(writer, sheet_name='Full Comparison', index=False)
         
-        self.format_and_highlight(output_file, rows_to_highlight)
+        self.format_and_highlight(output_file, red_rows, yellow_rows)
         
         return output_file
     
     def calculate_rows_to_highlight(self, detail_df, diff_dict):
-        """Figure out which rows to highlight by prioritizing smaller quantities first."""
-        rows_to_highlight = set()
+        """Figure out which rows to highlight. Red=full, Yellow=partial."""
+        red_rows = set()
+        yellow_rows = set()
         
         for iet, diff_needed in diff_dict.items():
             # Get all rows for this IET #, sorted by return_qty ascending
             iet_rows = detail_df[detail_df['IET #'].astype(str) == iet].copy()
             iet_rows = iet_rows.sort_values('return_qty', ascending=True)
             
-            qty_highlighted = 0
+            qty_remaining = diff_needed
+            
             for idx, row in iet_rows.iterrows():
-                if qty_highlighted >= diff_needed:
+                if qty_remaining <= 0:
                     break
+                    
                 row_qty = int(row['return_qty']) if pd.notna(row['return_qty']) else 1
-                # Only highlight if it doesn't overshoot, OR if we haven't highlighted anything yet
-                if qty_highlighted + row_qty <= diff_needed or qty_highlighted == 0:
-                    rows_to_highlight.add(idx)
-                    qty_highlighted += row_qty
-                # If this row would overshoot but we still need more, check if it's closer than skipping
-                elif diff_needed - qty_highlighted > 0:
-                    # Highlight it anyway if we'd still be short otherwise
-                    rows_to_highlight.add(idx)
-                    qty_highlighted += row_qty
-                    break
+                
+                if row_qty <= qty_remaining:
+                    # Full row counts - RED
+                    red_rows.add(idx)
+                    qty_remaining -= row_qty
+                else:
+                    # Partial row - row has more than we need - YELLOW
+                    yellow_rows.add(idx)
+                    qty_remaining = 0  # We're done with this SKU
         
-        return rows_to_highlight
+        return red_rows, yellow_rows
     
-    def format_and_highlight(self, file_path, rows_to_highlight):
+    def format_and_highlight(self, file_path, red_rows, yellow_rows):
         wb = load_workbook(file_path)
         
         header_fill = PatternFill('solid', fgColor='4472C4')
@@ -193,11 +195,13 @@ class ReconcilerApp:
                             cell.fill = fill
             
             if ws.title == 'IE Tire Detail':
-                # Row 2 in Excel = index 0 in DataFrame
                 for excel_row_num, row in enumerate(ws.iter_rows(min_row=2), start=0):
-                    if excel_row_num in rows_to_highlight:
+                    if excel_row_num in red_rows:
                         for cell in row:
                             cell.fill = red
+                    elif excel_row_num in yellow_rows:
+                        for cell in row:
+                            cell.fill = yellow
         
         wb.save(file_path)
 
