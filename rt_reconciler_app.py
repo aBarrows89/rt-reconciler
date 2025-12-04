@@ -103,13 +103,16 @@ class ReconcilerApp:
         discrepancies = merged[merged['DIFF'] != 0].sort_values('DIFF', key=abs, ascending=False)
         not_in_rt = discrepancies[discrepancies['RT'] == 0].copy()
         
-        # Build dict of IET # -> DIFF amount (how many UNITS to highlight per SKU)
+        # Build dict of IET # -> DIFF amount
         diff_dict = {}
         for _, row in discrepancies.iterrows():
             iet = str(row['IET #'])
             diff = int(row['DIFF'])
-            if diff > 0:  # Only highlight if Simple has more than RT
+            if diff > 0:
                 diff_dict[iet] = diff
+        
+        # Pre-calculate which rows to highlight (using detail_df to sort by qty)
+        rows_to_highlight = self.calculate_rows_to_highlight(detail_df, diff_dict)
         
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
@@ -121,12 +124,38 @@ class ReconcilerApp:
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             merged.to_excel(writer, sheet_name='Full Comparison', index=False)
         
-        # Apply formatting and highlight based on return_qty
-        self.format_and_highlight(output_file, diff_dict)
+        self.format_and_highlight(output_file, rows_to_highlight)
         
         return output_file
     
-    def format_and_highlight(self, file_path, diff_dict):
+    def calculate_rows_to_highlight(self, detail_df, diff_dict):
+        """Figure out which rows to highlight by prioritizing smaller quantities first."""
+        rows_to_highlight = set()
+        
+        for iet, diff_needed in diff_dict.items():
+            # Get all rows for this IET #, sorted by return_qty ascending
+            iet_rows = detail_df[detail_df['IET #'].astype(str) == iet].copy()
+            iet_rows = iet_rows.sort_values('return_qty', ascending=True)
+            
+            qty_highlighted = 0
+            for idx, row in iet_rows.iterrows():
+                if qty_highlighted >= diff_needed:
+                    break
+                row_qty = int(row['return_qty']) if pd.notna(row['return_qty']) else 1
+                # Only highlight if it doesn't overshoot, OR if we haven't highlighted anything yet
+                if qty_highlighted + row_qty <= diff_needed or qty_highlighted == 0:
+                    rows_to_highlight.add(idx)
+                    qty_highlighted += row_qty
+                # If this row would overshoot but we still need more, check if it's closer than skipping
+                elif diff_needed - qty_highlighted > 0:
+                    # Highlight it anyway if we'd still be short otherwise
+                    rows_to_highlight.add(idx)
+                    qty_highlighted += row_qty
+                    break
+        
+        return rows_to_highlight
+    
+    def format_and_highlight(self, file_path, rows_to_highlight):
         wb = load_workbook(file_path)
         
         header_fill = PatternFill('solid', fgColor='4472C4')
@@ -136,17 +165,14 @@ class ReconcilerApp:
         red = PatternFill('solid', fgColor='FFC7CE')
         
         for ws in wb.worksheets:
-            # Format headers
             for cell in ws[1]:
                 cell.fill = header_fill
                 cell.font = header_font
             
-            # Auto-fit columns
             for col in ws.columns:
                 max_len = max(len(str(cell.value or '')) for cell in col)
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
             
-            # Color code DIFF column in comparison sheets
             if ws.title in ['Discrepancies', 'Reconciled', 'Not in RT', 'Full Comparison']:
                 diff_col = None
                 for i, cell in enumerate(ws[1], 1):
@@ -166,36 +192,12 @@ class ReconcilerApp:
                         for cell in row[:diff_col]:
                             cell.fill = fill
             
-            # Highlight based on return_qty in IE Tire Detail
             if ws.title == 'IE Tire Detail':
-                # Find IET # and return_qty columns
-                iet_col = None
-                qty_col = None
-                for i, cell in enumerate(ws[1], 1):
-                    if cell.value == 'IET #':
-                        iet_col = i
-                    if cell.value == 'return_qty':
-                        qty_col = i
-                
-                if iet_col and qty_col:
-                    # Track how many UNITS we've highlighted per SKU
-                    highlight_qty = {k: 0 for k in diff_dict.keys()}
-                    
-                    for row in ws.iter_rows(min_row=2):
-                        iet_value = str(row[iet_col-1].value or '')
-                        row_qty = row[qty_col-1].value or 1
-                        try:
-                            row_qty = int(row_qty)
-                        except:
-                            row_qty = 1
-                        
-                        if iet_value in diff_dict:
-                            # Only highlight if we haven't reached the DIFF amount yet
-                            remaining = diff_dict[iet_value] - highlight_qty[iet_value]
-                            if remaining > 0:
-                                for cell in row:
-                                    cell.fill = red
-                                highlight_qty[iet_value] += row_qty
+                # Row 2 in Excel = index 0 in DataFrame
+                for excel_row_num, row in enumerate(ws.iter_rows(min_row=2), start=0):
+                    if excel_row_num in rows_to_highlight:
+                        for cell in row:
+                            cell.fill = red
         
         wb.save(file_path)
 
