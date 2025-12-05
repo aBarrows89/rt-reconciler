@@ -35,7 +35,7 @@ class ReconcilerApp:
         # RT Export
         frame2 = tk.Frame(self.root, bg='#f0f0f0', pady=10)
         frame2.pack(fill="x", padx=20)
-        tk.Label(frame2, text="RT Export:", font=("Arial", 10), bg='#f0f0f0').pack(anchor="w")
+        tk.Label(frame2, text="RT Comparison:", font=("Arial", 10), bg='#f0f0f0').pack(anchor="w")
         f2 = tk.Frame(frame2, bg='#f0f0f0')
         f2.pack(fill="x", pady=5)
         tk.Entry(f2, textvariable=self.rt_file, width=55, font=("Arial", 9)).pack(side="left", fill="x", expand=True)
@@ -70,7 +70,7 @@ class ReconcilerApp:
         if f: self.simple_file.set(f)
     
     def browse_rt(self):
-        f = filedialog.askopenfilename(title="Select RT Export", filetypes=[("Excel", "*.xlsx *.xls")])
+        f = filedialog.askopenfilename(title="Select RT Comparison", filetypes=[("Excel", "*.xlsx *.xls")])
         if f: self.rt_file.set(f)
     
     def start_reconcile(self):
@@ -118,58 +118,49 @@ Open now?"""
         messagebox.showerror("Error", msg)
     
     def reconcile(self, simple_file, rt_file):
-        simple_pivot = pd.read_excel(simple_file, sheet_name='Sheet1', skiprows=1)
-        simple_pivot.columns = ['IET #', 'SIMPLE']
-        simple_pivot = simple_pivot.dropna(subset=['IET #'])
-        simple_pivot = simple_pivot[~simple_pivot['IET #'].astype(str).str.lower().str.contains('grand total|blank|row labels', na=False)]
-        simple_pivot['SIMPLE'] = pd.to_numeric(simple_pivot['SIMPLE'], errors='coerce').fillna(0).astype(int)
+        # Load detail data from Simple Workbook
         detail_df = pd.read_excel(simple_file, sheet_name='IE Tire')
         
+        # Load RT Comparison - this has the correct SIMPLE, RT, and DIFF already
         rt_df = pd.read_excel(rt_file, sheet_name=0)
-        if 'RT' in rt_df.columns:
-            rt_data = rt_df[[rt_df.columns[0], 'RT']].copy()
-        else:
-            rt_data = rt_df.iloc[:, [0, -1]].copy()
-        rt_data.columns = ['IET #', 'RT']
-        rt_data = rt_data.dropna(subset=['IET #'])
-        rt_data['RT'] = pd.to_numeric(rt_data['RT'], errors='coerce').fillna(0).astype(int)
         
-        merged = simple_pivot.merge(rt_data, on='IET #', how='left')
-        merged['RT'] = merged['RT'].fillna(0).astype(int)
-        merged['DIFF'] = merged['SIMPLE'] - merged['RT']
+        # Standardize column names
+        rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
+        rt_df = rt_df.dropna(subset=['IET #'])
         
-        # Build diff dict
+        # Use RT file's numbers directly
+        stats = {
+            'simple': int(rt_df['SIMPLE'].sum()),
+            'rt': int(rt_df['RT'].sum()),
+            'variance': int(rt_df['DIFF'].sum())
+        }
+        
+        # Build diff dict from RT file (only positive DIFF = Simple has more than RT)
         diff_dict = {}
-        for _, row in merged.iterrows():
-            if row['DIFF'] > 0:
-                diff_dict[str(row['IET #'])] = int(row['DIFF'])
+        for _, row in rt_df.iterrows():
+            diff = int(row['DIFF']) if pd.notna(row['DIFF']) else 0
+            if diff > 0:
+                diff_dict[str(row['IET #'])] = diff
         
         # Add Variance Qty to detail
         detail_df = self.add_variance_qty(detail_df, diff_dict)
         
-        # Stats
-        stats = {
-            'simple': int(merged['SIMPLE'].sum()),
-            'rt': int(merged['RT'].sum()),
-            'variance': int(merged['DIFF'].sum())
-        }
-        
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
-        # Only output the essential tabs
+        # Output tabs
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            # Summary - simple and clean
+            # Summary
             summary = pd.DataFrame({
                 'Metric': ['SIMPLE Total', 'RT Total', 'Variance', '', 'Instructions:'],
                 'Value': [stats['simple'], stats['rt'], stats['variance'], '', 'Go to IE Tire Detail, filter Variance Qty > 0, copy red rows']
             })
             summary.to_excel(writer, sheet_name='Summary', index=False)
             
-            # Main output - IE Tire Detail with Variance Qty
+            # IE Tire Detail with Variance Qty
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             
-            # Full comparison for reference
-            merged.to_excel(writer, sheet_name='SKU Comparison', index=False)
+            # SKU Comparison from RT file
+            rt_df.to_excel(writer, sheet_name='SKU Comparison', index=False)
         
         self.format_workbook(output_file)
         
