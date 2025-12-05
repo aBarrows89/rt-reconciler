@@ -111,53 +111,48 @@ class ReconcilerApp:
             if diff > 0:
                 diff_dict[iet] = diff
         
-        # Calculate which rows to highlight (red=full, yellow=partial)
-        red_rows, yellow_rows = self.calculate_rows_to_highlight(detail_df, diff_dict)
+        # Add Variance Qty column to detail
+        detail_df = self.add_variance_qty(detail_df, diff_dict)
         
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            pd.DataFrame({'Metric': ['Total SKUs', 'Reconciled', 'Discrepancies', 'Not in RT', '', 'SIMPLE Total', 'RT Total', 'Variance', '', 'Red = Full row variance', 'Yellow = Partial (row qty > needed)'], 'Value': [len(merged), len(reconciled), len(discrepancies), len(not_in_rt), '', merged['SIMPLE'].sum(), merged['RT'].sum(), merged['DIFF'].sum(), '', '', '']}).to_excel(writer, sheet_name='Summary', index=False)
+            pd.DataFrame({
+                'Metric': ['Total SKUs', 'Reconciled', 'Discrepancies', 'Not in RT', '', 'SIMPLE Total', 'RT Total', 'Variance', '', 'Filter IE Tire Detail where Variance Qty > 0'], 
+                'Value': [len(merged), len(reconciled), len(discrepancies), len(not_in_rt), '', merged['SIMPLE'].sum(), merged['RT'].sum(), merged['DIFF'].sum(), '', '']
+            }).to_excel(writer, sheet_name='Summary', index=False)
             discrepancies.to_excel(writer, sheet_name='Discrepancies', index=False)
             reconciled.to_excel(writer, sheet_name='Reconciled', index=False)
             not_in_rt.to_excel(writer, sheet_name='Not in RT', index=False)
             detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
             merged.to_excel(writer, sheet_name='Full Comparison', index=False)
         
-        self.format_and_highlight(output_file, red_rows, yellow_rows)
+        self.format_workbook(output_file)
         
         return output_file
     
-    def calculate_rows_to_highlight(self, detail_df, diff_dict):
-        """Figure out which rows to highlight. Red=full, Yellow=partial."""
-        red_rows = set()
-        yellow_rows = set()
+    def add_variance_qty(self, detail_df, diff_dict):
+        """Add Variance Qty column showing exactly how many units per row are unaccounted for."""
+        # Initialize Variance Qty to 0
+        detail_df = detail_df.copy()
+        detail_df['Variance Qty'] = 0
         
-        for iet, diff_needed in diff_dict.items():
-            # Get all rows for this IET #, sorted by return_qty ascending
-            iet_rows = detail_df[detail_df['IET #'].astype(str) == iet].copy()
-            iet_rows = iet_rows.sort_values('return_qty', ascending=True)
-            
-            qty_remaining = diff_needed
-            
-            for idx, row in iet_rows.iterrows():
-                if qty_remaining <= 0:
-                    break
-                    
+        # Track remaining variance per SKU
+        remaining = diff_dict.copy()
+        
+        # Process each row
+        for idx, row in detail_df.iterrows():
+            iet = str(row['IET #'])
+            if iet in remaining and remaining[iet] > 0:
                 row_qty = int(row['return_qty']) if pd.notna(row['return_qty']) else 1
-                
-                if row_qty <= qty_remaining:
-                    # Full row counts - RED
-                    red_rows.add(idx)
-                    qty_remaining -= row_qty
-                else:
-                    # Partial row - row has more than we need - YELLOW
-                    yellow_rows.add(idx)
-                    qty_remaining = 0  # We're done with this SKU
+                # Assign as much variance as possible from this row
+                assign = min(row_qty, remaining[iet])
+                detail_df.at[idx, 'Variance Qty'] = assign
+                remaining[iet] -= assign
         
-        return red_rows, yellow_rows
+        return detail_df
     
-    def format_and_highlight(self, file_path, red_rows, yellow_rows):
+    def format_workbook(self, file_path):
         wb = load_workbook(file_path)
         
         header_fill = PatternFill('solid', fgColor='4472C4')
@@ -167,14 +162,17 @@ class ReconcilerApp:
         red = PatternFill('solid', fgColor='FFC7CE')
         
         for ws in wb.worksheets:
+            # Format headers
             for cell in ws[1]:
                 cell.fill = header_fill
                 cell.font = header_font
             
+            # Auto-fit columns
             for col in ws.columns:
                 max_len = max(len(str(cell.value or '')) for cell in col)
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
             
+            # Color code DIFF in comparison sheets
             if ws.title in ['Discrepancies', 'Reconciled', 'Not in RT', 'Full Comparison']:
                 diff_col = None
                 for i, cell in enumerate(ws[1], 1):
@@ -194,14 +192,20 @@ class ReconcilerApp:
                         for cell in row[:diff_col]:
                             cell.fill = fill
             
+            # Highlight rows with Variance Qty > 0 in IE Tire Detail
             if ws.title == 'IE Tire Detail':
-                for excel_row_num, row in enumerate(ws.iter_rows(min_row=2), start=0):
-                    if excel_row_num in red_rows:
-                        for cell in row:
-                            cell.fill = red
-                    elif excel_row_num in yellow_rows:
-                        for cell in row:
-                            cell.fill = yellow
+                var_col = None
+                for i, cell in enumerate(ws[1], 1):
+                    if cell.value == 'Variance Qty':
+                        var_col = i
+                        break
+                
+                if var_col:
+                    for row in ws.iter_rows(min_row=2):
+                        val = row[var_col-1].value
+                        if val and val > 0:
+                            for cell in row:
+                                cell.fill = red
         
         wb.save(file_path)
 
