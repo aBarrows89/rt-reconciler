@@ -11,68 +11,221 @@ class ReconcilerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("RT Reconciler")
-        self.root.geometry("500x350")
+        self.root.geometry("520x400")
         self.root.resizable(False, False)
+        self.root.configure(bg='#f0f0f0')
         self.simple_file = tk.StringVar()
         self.rt_file = tk.StringVar()
         self.create_widgets()
     
     def create_widgets(self):
-        tk.Label(self.root, text="RT vs Simple Reconciler", font=("Arial", 16, "bold"), pady=20).pack()
+        # Title
+        title = tk.Label(self.root, text="RT vs Simple Reconciler", font=("Arial", 18, "bold"), bg='#f0f0f0')
+        title.pack(pady=20)
         
-        frame1 = tk.Frame(self.root, pady=10)
+        # Simple Workbook
+        frame1 = tk.Frame(self.root, bg='#f0f0f0', pady=10)
         frame1.pack(fill="x", padx=20)
-        tk.Label(frame1, text="Simple Workbook:").pack(anchor="w")
-        f1 = tk.Frame(frame1)
+        tk.Label(frame1, text="Simple Workbook:", font=("Arial", 10), bg='#f0f0f0').pack(anchor="w")
+        f1 = tk.Frame(frame1, bg='#f0f0f0')
         f1.pack(fill="x", pady=5)
-        tk.Entry(f1, textvariable=self.simple_file, width=50).pack(side="left", fill="x", expand=True)
-        tk.Button(f1, text="Browse...", command=self.browse_simple).pack(side="right", padx=5)
+        tk.Entry(f1, textvariable=self.simple_file, width=55, font=("Arial", 9)).pack(side="left", fill="x", expand=True)
+        tk.Button(f1, text="Browse...", command=self.browse_simple, width=10).pack(side="right", padx=5)
         
-        frame2 = tk.Frame(self.root, pady=10)
+        # RT Export
+        frame2 = tk.Frame(self.root, bg='#f0f0f0', pady=10)
         frame2.pack(fill="x", padx=20)
-        tk.Label(frame2, text="RT Export:").pack(anchor="w")
-        f2 = tk.Frame(frame2)
+        tk.Label(frame2, text="RT Comparison:", font=("Arial", 10), bg='#f0f0f0').pack(anchor="w")
+        f2 = tk.Frame(frame2, bg='#f0f0f0')
         f2.pack(fill="x", pady=5)
-        tk.Entry(f2, textvariable=self.rt_file, width=50).pack(side="left", fill="x", expand=True)
-        tk.Button(f2, text="Browse...", command=self.browse_rt).pack(side="right", padx=5)
+        tk.Entry(f2, textvariable=self.rt_file, width=55, font=("Arial", 9)).pack(side="left", fill="x", expand=True)
+        tk.Button(f2, text="Browse...", command=self.browse_rt, width=10).pack(side="right", padx=5)
         
-        self.progress = ttk.Progressbar(self.root, mode="indeterminate", length=400)
+        # Progress
+        self.progress = ttk.Progressbar(self.root, mode="indeterminate", length=450)
         self.progress.pack(pady=20)
         
+        # Status
         self.status_var = tk.StringVar(value="Select files and click Reconcile")
-        tk.Label(self.root, textvariable=self.status_var).pack(pady=10)
+        tk.Label(self.root, textvariable=self.status_var, font=("Arial", 10), bg='#f0f0f0').pack(pady=5)
         
-        tk.Button(self.root, text="Reconcile", font=("Arial", 12, "bold"), width=20, height=2, command=self.start_reconcile).pack(pady=10)
+        # Big visible button
+        self.btn = tk.Button(
+            self.root, 
+            text="RECONCILE", 
+            font=("Arial", 14, "bold"),
+            width=20,
+            height=2,
+            bg='#4472C4',
+            fg='white',
+            activebackground='#3461b3',
+            activeforeground='white',
+            cursor='hand2',
+            command=self.start_reconcile
+        )
+        self.btn.pack(pady=20)
     
     def browse_simple(self):
         f = filedialog.askopenfilename(title="Select Simple Workbook", filetypes=[("Excel", "*.xlsx *.xls")])
         if f: self.simple_file.set(f)
     
     def browse_rt(self):
-        f = filedialog.askopenfilename(title="Select RT Export", filetypes=[("Excel", "*.xlsx *.xls")])
+        f = filedialog.askopenfilename(title="Select RT Comparison", filetypes=[("Excel", "*.xlsx *.xls")])
         if f: self.rt_file.set(f)
     
     def start_reconcile(self):
         if not self.simple_file.get() or not self.rt_file.get():
             messagebox.showerror("Error", "Please select both files")
             return
+        self.btn.config(state='disabled')
         self.progress.start()
         self.status_var.set("Processing...")
         threading.Thread(target=self.run_reconcile).start()
     
     def run_reconcile(self):
         try:
-            output = self.reconcile(self.simple_file.get(), self.rt_file.get())
-            self.root.after(0, lambda: self.on_complete(output))
+            output, stats = self.reconcile(self.simple_file.get(), self.rt_file.get())
+            self.root.after(0, lambda: self.on_complete(output, stats))
         except Exception as e:
             self.root.after(0, lambda: self.on_error(str(e)))
     
-    def on_complete(self, output_file):
+    def on_complete(self, output_file, stats):
         self.progress.stop()
+        self.btn.config(state='normal')
         self.status_var.set("Complete!")
-        if messagebox.askyesno("Success", f"Saved to:\n{output_file}\n\nOpen now?"):
+        
+        msg = f"""Reconciliation complete!
+
+SIMPLE Total: {stats['simple']}
+RT Total: {stats['rt']}
+Variance: {stats['variance']}
+
+Output: {os.path.basename(output_file)}
+
+Go to 'IE Tire Detail' tab
+Filter 'Variance Qty' > 0
+Copy red rows to Google Doc
+
+Open now?"""
+        
+        if messagebox.askyesno("Success", msg):
             os.startfile(output_file)
     
     def on_error(self, msg):
         self.progress.stop()
-        se
+        self.btn.config(state='normal')
+        self.status_var.set("Error")
+        messagebox.showerror("Error", msg)
+    
+    def reconcile(self, simple_file, rt_file):
+        # Load detail data from Simple Workbook
+        detail_df = pd.read_excel(simple_file, sheet_name='IE Tire')
+        
+        # Load RT Comparison - this has the correct SIMPLE, RT, and DIFF already
+        rt_df = pd.read_excel(rt_file, sheet_name=0)
+        
+        # Standardize column names
+        rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
+        rt_df = rt_df.dropna(subset=['IET #'])
+        
+        # Use RT file's numbers directly
+        stats = {
+            'simple': int(rt_df['SIMPLE'].sum()),
+            'rt': int(rt_df['RT'].sum()),
+            'variance': int(rt_df['DIFF'].sum())
+        }
+        
+        # Build diff dict from RT file (only positive DIFF = Simple has more than RT)
+        diff_dict = {}
+        for _, row in rt_df.iterrows():
+            diff = int(row['DIFF']) if pd.notna(row['DIFF']) else 0
+            if diff > 0:
+                diff_dict[self.normalize_sku(row['IET #'])] = diff
+        
+        # Add Variance Qty to detail
+        detail_df = self.add_variance_qty(detail_df, diff_dict)
+        
+        output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+        
+        # Output tabs
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            # Summary
+            summary = pd.DataFrame({
+                'Metric': ['SIMPLE Total', 'RT Total', 'Variance', '', 'Instructions:'],
+                'Value': [stats['simple'], stats['rt'], stats['variance'], '', 'Go to IE Tire Detail, filter Variance Qty > 0, copy red rows']
+            })
+            summary.to_excel(writer, sheet_name='Summary', index=False)
+            
+            # IE Tire Detail with Variance Qty
+            detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
+            
+            # SKU Comparison from RT file
+            rt_df.to_excel(writer, sheet_name='SKU Comparison', index=False)
+        
+        self.format_workbook(output_file)
+        
+        return output_file, stats
+    
+    @staticmethod
+    def normalize_sku(val):
+        """Normalize SKU values to prevent mismatches from whitespace, case, or float casting."""
+        s = str(val).strip().upper()
+        # Kill trailing .0 from pandas float conversion
+        if s.endswith('.0'):
+            s = s[:-2]
+        return s
+
+    def add_variance_qty(self, detail_df, diff_dict):
+        detail_df = detail_df.copy()
+        detail_df['Variance Qty'] = 0
+        remaining = diff_dict.copy()
+        
+        for idx, row in detail_df.iterrows():
+            iet = self.normalize_sku(row['IET #'])
+            if iet in remaining and remaining[iet] > 0:
+                row_qty = int(row['return_qty']) if pd.notna(row['return_qty']) else 1
+                assign = min(row_qty, remaining[iet])
+                detail_df.at[idx, 'Variance Qty'] = assign
+                remaining[iet] -= assign
+        
+        return detail_df
+    
+    def format_workbook(self, file_path):
+        wb = load_workbook(file_path)
+        
+        header_fill = PatternFill('solid', fgColor='4472C4')
+        header_font = Font(color='FFFFFF', bold=True)
+        red = PatternFill('solid', fgColor='FFC7CE')
+        
+        for ws in wb.worksheets:
+            # Headers
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+            
+            # Column widths
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
+            
+            # Highlight Variance Qty > 0 in IE Tire Detail
+            if ws.title == 'IE Tire Detail':
+                var_col = None
+                for i, cell in enumerate(ws[1], 1):
+                    if cell.value == 'Variance Qty':
+                        var_col = i
+                        break
+                
+                if var_col:
+                    for row in ws.iter_rows(min_row=2):
+                        val = row[var_col-1].value
+                        if val and val > 0:
+                            for cell in row:
+                                cell.fill = red
+        
+        wb.save(file_path)
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    ReconcilerApp(root)
+    root.mainloop()
