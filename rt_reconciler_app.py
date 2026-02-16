@@ -140,7 +140,7 @@ Open now?"""
         for _, row in rt_df.iterrows():
             diff = int(row['DIFF']) if pd.notna(row['DIFF']) else 0
             if diff > 0:
-                diff_dict[str(row['IET #'])] = diff
+                diff_dict[self.normalize_sku(row['IET #'])] = diff
         
         # Add Variance Qty to detail
         detail_df = self.add_variance_qty(detail_df, diff_dict)
@@ -166,13 +166,22 @@ Open now?"""
         
         return output_file, stats
     
+    @staticmethod
+    def normalize_sku(val):
+        """Normalize SKU values to prevent mismatches from whitespace, case, or float casting."""
+        s = str(val).strip().upper()
+        # Kill trailing .0 from pandas float conversion
+        if s.endswith('.0'):
+            s = s[:-2]
+        return s
+
     def add_variance_qty(self, detail_df, diff_dict):
         detail_df = detail_df.copy()
         detail_df['Variance Qty'] = 0
         remaining = diff_dict.copy()
         
         for idx, row in detail_df.iterrows():
-            iet = str(row['IET #'])
+            iet = self.normalize_sku(row['IET #'])
             if iet in remaining and remaining[iet] > 0:
                 row_qty = int(row['return_qty']) if pd.notna(row['return_qty']) else 1
                 assign = min(row_qty, remaining[iet])
