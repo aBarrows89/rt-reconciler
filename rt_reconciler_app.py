@@ -146,10 +146,10 @@ Open now?"""
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
         # Split RT data into filtered views
-        # Ready to Receive: exists in both but quantities don't match (DIFF > 0, RT > 0)
-        ready_df = rt_df[(rt_df['DIFF'] > 0) & (rt_df['RT'] > 0)].copy()
-        # Unmatched: in Simple but never made it to RT (RT = 0)
-        unmatched_df = rt_df[rt_df['RT'] == 0].copy()
+        # Ready to Receive: exists in both but quantities don't match (DIFF > 0, RT > 0, SIMPLE > 0)
+        ready_df = rt_df[(rt_df['DIFF'] > 0) & (rt_df['RT'] > 0) & (rt_df['SIMPLE'] > 0)].copy()
+        # Unmatched: in RT but not in Simple (SIMPLE = 0, RT > 0)
+        unmatched_df = rt_df[(rt_df['SIMPLE'] == 0) & (rt_df['RT'] > 0)].copy()
         # Previously Received: fully matched (DIFF = 0)
         received_df = rt_df[rt_df['DIFF'] == 0].copy()
 
