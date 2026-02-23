@@ -122,8 +122,14 @@ Open now?"""
         # Load RT Comparison - this has the correct SIMPLE, RT, and DIFF already
         rt_df = pd.read_excel(rt_file, sheet_name=0)
         
-        # Standardize column names
-        rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
+        # Standardize column names - handle 3 or 4 column files
+        if len(rt_df.columns) == 4:
+            rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
+        elif len(rt_df.columns) == 3:
+            rt_df.columns = ['IET #', 'SIMPLE', 'RT']
+            rt_df['DIFF'] = rt_df['SIMPLE'] - rt_df['RT']
+        else:
+            raise ValueError(f"RT file has {len(rt_df.columns)} columns, expected 3 or 4")
         rt_df = rt_df.dropna(subset=['IET #'])
         
         # Use RT file's numbers directly
