@@ -102,9 +102,7 @@ Variance: {stats['variance']}
 
 Output: {os.path.basename(output_file)}
 
-Go to 'IE Tire Detail' tab
-Filter 'Variance Qty' > 0
-Copy red rows to Google Doc
+Tabs: IE Tire | Ready to Receive | Unmatched | Previously Received
 
 Open now?"""
         
@@ -124,8 +122,14 @@ Open now?"""
         # Load RT Comparison - this has the correct SIMPLE, RT, and DIFF already
         rt_df = pd.read_excel(rt_file, sheet_name=0)
         
-        # Standardize column names
-        rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
+        # Standardize column names - handle 3 or 4 column files
+        if len(rt_df.columns) == 4:
+            rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
+        elif len(rt_df.columns) == 3:
+            rt_df.columns = ['IET #', 'SIMPLE', 'RT']
+            rt_df['DIFF'] = rt_df['SIMPLE'] - rt_df['RT']
+        else:
+            raise ValueError(f"RT file has {len(rt_df.columns)} columns, expected 3 or 4")
         rt_df = rt_df.dropna(subset=['IET #'])
         
         # Use RT file's numbers directly
@@ -147,20 +151,27 @@ Open now?"""
         
         output_file = os.path.join(os.path.dirname(simple_file), f"Reconciled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         
+        # Split RT data into filtered views
+        # Ready to Receive: exists in both but quantities don't match (DIFF > 0, RT > 0, SIMPLE > 0)
+        ready_df = rt_df[(rt_df['DIFF'] > 0) & (rt_df['RT'] > 0) & (rt_df['SIMPLE'] > 0)].copy()
+        # Unmatched: in RT but not in Simple (SIMPLE = 0, RT > 0)
+        unmatched_df = rt_df[(rt_df['SIMPLE'] == 0) & (rt_df['RT'] > 0)].copy()
+        # Previously Received: fully matched (DIFF = 0)
+        received_df = rt_df[rt_df['DIFF'] == 0].copy()
+
         # Output tabs
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            # Summary
-            summary = pd.DataFrame({
-                'Metric': ['SIMPLE Total', 'RT Total', 'Variance', '', 'Instructions:'],
-                'Value': [stats['simple'], stats['rt'], stats['variance'], '', 'Go to IE Tire Detail, filter Variance Qty > 0, copy red rows']
-            })
-            summary.to_excel(writer, sheet_name='Summary', index=False)
+            # IE Tire - full detail with variance
+            detail_df.to_excel(writer, sheet_name='IE Tire', index=False)
             
-            # IE Tire Detail with Variance Qty
-            detail_df.to_excel(writer, sheet_name='IE Tire Detail', index=False)
+            # Ready to Receive - items still waiting (DIFF > 0)
+            ready_df.to_excel(writer, sheet_name='Ready to Receive', index=False)
             
-            # SKU Comparison from RT file
-            rt_df.to_excel(writer, sheet_name='SKU Comparison', index=False)
+            # Unmatched - items with variances (DIFF > 0)
+            unmatched_df.to_excel(writer, sheet_name='Unmatched', index=False)
+            
+            # Previously Received - matched items (DIFF = 0)
+            received_df.to_excel(writer, sheet_name='Previously Received', index=False)
         
         self.format_workbook(output_file)
         
@@ -208,8 +219,8 @@ Open now?"""
                 max_len = max(len(str(cell.value or '')) for cell in col)
                 ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
             
-            # Highlight Variance Qty > 0 in IE Tire Detail
-            if ws.title == 'IE Tire Detail':
+            # Highlight Variance Qty > 0 in IE Tire
+            if ws.title == 'IE Tire':
                 var_col = None
                 for i, cell in enumerate(ws[1], 1):
                     if cell.value == 'Variance Qty':
@@ -222,6 +233,26 @@ Open now?"""
                         if val and val > 0:
                             for cell in row:
                                 cell.fill = red
+            
+            # Highlight Ready to Receive rows yellow (qty mismatch)
+            if ws.title == 'Ready to Receive':
+                yellow = PatternFill('solid', fgColor='FFEB9C')
+                for row in ws.iter_rows(min_row=2):
+                    for cell in row:
+                        cell.fill = yellow
+            
+            # Highlight Unmatched rows red (not in RT at all)
+            if ws.title == 'Unmatched':
+                for row in ws.iter_rows(min_row=2):
+                    for cell in row:
+                        cell.fill = red
+            
+            # Highlight all data rows in Previously Received green
+            if ws.title == 'Previously Received':
+                green = PatternFill('solid', fgColor='C6EFCE')
+                for row in ws.iter_rows(min_row=2):
+                    for cell in row:
+                        cell.fill = green
         
         wb.save(file_path)
 
