@@ -127,6 +127,8 @@ Open now?"""
             rt_df.columns = ['IET #', 'SIMPLE', 'RT', 'DIFF']
         elif len(rt_df.columns) == 3:
             rt_df.columns = ['IET #', 'SIMPLE', 'RT']
+            rt_df['SIMPLE'] = pd.to_numeric(rt_df['SIMPLE'], errors='coerce').fillna(0).astype(int)
+            rt_df['RT'] = pd.to_numeric(rt_df['RT'], errors='coerce').fillna(0).astype(int)
             rt_df['DIFF'] = rt_df['SIMPLE'] - rt_df['RT']
         else:
             raise ValueError(f"RT file has {len(rt_df.columns)} columns, expected 3 or 4")
