@@ -78,22 +78,16 @@ class ReconcilerApp:
             messagebox.showerror("Error", "Please select both files")
             return
         self.btn.config(state='disabled')
-        self.progress.start()
         self.status_var.set("Processing...")
-        t = threading.Thread(target=self.run_reconcile, daemon=True)
-        t.start()
-    
-    def run_reconcile(self):
+        self.root.update()
         try:
             output, stats = self.reconcile(self.simple_file.get(), self.rt_file.get())
-            self.root.after(0, lambda: self.on_complete(output, stats))
+            self.on_complete(output, stats)
         except Exception as e:
             import traceback
-            err_msg = f"{str(e)}\n\n{traceback.format_exc()}"
-            self.root.after(0, lambda: self.on_error(err_msg))
+            self.on_error(f"{str(e)}\n\n{traceback.format_exc()}")
     
     def on_complete(self, output_file, stats):
-        self.progress.stop()
         self.btn.config(state='normal')
         self.status_var.set("Complete!")
         
@@ -113,7 +107,6 @@ Open now?"""
             os.startfile(output_file)
     
     def on_error(self, msg):
-        self.progress.stop()
         self.btn.config(state='normal')
         self.status_var.set("Error")
         messagebox.showerror("Error", msg)
