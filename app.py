@@ -80,14 +80,17 @@ class ReconcilerApp:
         self.btn.config(state='disabled')
         self.progress.start()
         self.status_var.set("Processing...")
-        threading.Thread(target=self.run_reconcile).start()
+        t = threading.Thread(target=self.run_reconcile, daemon=True)
+        t.start()
     
     def run_reconcile(self):
         try:
             output, stats = self.reconcile(self.simple_file.get(), self.rt_file.get())
             self.root.after(0, lambda: self.on_complete(output, stats))
         except Exception as e:
-            self.root.after(0, lambda: self.on_error(str(e)))
+            import traceback
+            err_msg = f"{str(e)}\n\n{traceback.format_exc()}"
+            self.root.after(0, lambda: self.on_error(err_msg))
     
     def on_complete(self, output_file, stats):
         self.progress.stop()
